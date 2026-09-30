@@ -21,9 +21,6 @@ on:
     branches: [zh-site]
   workflow_dispatch:
 
-# Only the owner may deploy; do not let a fork's copy of this workflow publish.
-if: github.repository == 'ifeitao/portfolio-help'
-
 permissions:
   contents: write
 
@@ -33,6 +30,10 @@ concurrency:
 
 jobs:
   build-and-deploy:
+    # Only the owner may deploy; do not let a fork's copy of this workflow
+    # publish anywhere. This must live inside the job -- a top-level `if` is not
+    # a valid Actions key.
+    if: github.repository == 'ifeitao/portfolio-help'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
