@@ -1,0 +1,94 @@
+# Deploy the community Chinese translation to GitHub Pages.
+#
+# Deliberately separate from .github/workflows/main.yml, which deploys on master
+# and copies docs/root/* into the output. That copy step would publish
+# docs/root/CNAME (help.portfolio-performance.info) -- a domain this fork does
+# not own -- so this workflow never runs it.
+#
+# This workflow:
+#   - builds only config/zh/mkdocs.yml
+#   - rewrites site_url to this fork's own Pages URL, at build time only, so
+#     config/zh/mkdocs.yml stays byte-identical to the translation PR
+#   - publishes to the gh-pages branch under /zh/
+#
+# The translation is licensed CC BY-NC-SA 4.0; docs/zh/about.md carries the
+# required attribution and marks the build as an unofficial community
+# translation.
+name: Deploy Chinese translation
+
+on:
+  push:
+    branches: [zh-site]
+  workflow_dispatch:
+
+# Only the owner may deploy; do not let a fork's copy of this workflow publish.
+if: github.repository == 'ifeitao/portfolio-help'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-zh
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The plugin that stamps the build date needs real history.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Cache Python dependencies
+        uses: actions/cache@v5
+        with:
+          key: ${{ runner.os }}-python-${{ hashFiles('requirements.txt') }}
+          path: .cache
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install linkchecker
+
+      - name: Point site_url at this fork's Pages domain
+        run: |
+          # Build-time only: config/zh/mkdocs.yml is NOT modified in the repo, so
+          # this branch stays a clean superset of the translation PR.
+          #
+          # This fork publishes ONLY the Chinese manual, served at the Pages root
+          # for this repo: https://ifeitao.github.io/portfolio-help/
+          sed -i.bak "s|^site_url:.*|site_url: https://ifeitao.github.io/portfolio-help/|" \
+            config/zh/mkdocs.yml
+          # config/zh/mkdocs.yml writes to site/zh/ so a local build of all three
+          # languages keeps them side by side. This workflow publishes only the
+          # Chinese build, so flatten it to the repo-root ./site and drop the
+          # extra /zh/ level from the published URL. mkdocs resolves a relative
+          # site_dir against the config file's own directory, hence "$GITHUB_WORKSPACE".
+          sed -i.bak "s|^site_dir:.*|site_dir: ${GITHUB_WORKSPACE}/site|" config/zh/mkdocs.yml
+          # The language switcher points at the sibling builds. This fork does not
+          # publish them, so /en/ and /de/ would 404 (and fail the link check
+          # below). Send them to the official site -- which is also the
+          # licence-correct target: the authoritative English and German manuals
+          # are maintained upstream.
+          sed -i.bak -E "s|^([[:space:]]*link: )/(en\|de\|zh)/|\1https://help.portfolio-performance.info/\2/|" \
+            config/zh/mkdocs.yml
+          grep -E '^(site_url|site_name):|link: ' config/zh/mkdocs.yml
+
+      - name: Build Chinese documentation
+        run: mkdocs build -f config/zh/mkdocs.yml
+
+      - name: Check links
+        run: linkchecker site/
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
